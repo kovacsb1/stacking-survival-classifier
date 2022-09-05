@@ -6,6 +6,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neural_network import MLPClassifier
 
 
+# Contains allowed model names and default parameters
 MODELS = {
     "logistic_regression": {
         "model_class": LogisticRegression, 
@@ -40,8 +41,18 @@ class StackingClassifier:
 
     Attributes
     ----------
-
-
+    event_data: pd.DataFrame
+        Sorted copy of the DataFrame passed in the constructor
+    time_col: string
+        Name of the column containing time data
+    event_col: string
+        Name of the data containing the events
+    feature_cols: list of strings
+        Contains the name of the remaining columns
+    max_censored_set_size: int
+        Maximum number of censored values to use in risk sets
+    stratum_data_: pd.DataFrame
+        Contains features for each stratum
     """
     def __init__(self, model_name="logistic_regression", model_args={}):
         
@@ -62,7 +73,7 @@ class StackingClassifier:
         self.max_censored_set_size = None
 
         # store stratum means for inferencing
-        self.stratum_data = None
+        self.stratum_data_ = None
 
 
     def _set_up_data_fields(self, event_data, time_col, event_col, max_censored_set_size):
@@ -79,6 +90,24 @@ class StackingClassifier:
 
 
     def _get_risk_set(self, curr_event_data, event_start_index, event_size):
+        """
+        Returns risk set. Implements sampling if risk set size is bigger than 
+        `max_censored_set_size` 
+
+        Parameters
+        ----------
+        curr_event_data: pd.DataFrame
+            DataFrame containing the events that happened at the current time
+        event_start_index: int
+            Index of the first event that happened at the current time in `event_data`
+        event_size: int
+            Number of events happened at current time
+        
+        Returns
+        ----------
+        risk_set: pd.DataFrame
+            DataFrame containing the risk set
+        """
         censord_set_start_index = event_start_index + event_size
         num_censored = len(self.event_data) - censord_set_start_index
 
@@ -95,21 +124,45 @@ class StackingClassifier:
 
     
     def _process_stratum_data(self, stratum_data):
-        self.stratum_data=pd.DataFrame.from_records(stratum_data, index="time")
+        """
+        Creates a DataFrame where each record represents a stratum, from a list of dictionaries. 
+        The index is the time of the stratum. Also calculates GreenWood coefficients according 
+        to Equation 9 in the source paper.
+
+        Parameters
+        ----------
+        stratum_data_: list of dicts 
+            Contains data about each stratum: means of feature columns, number of failures,
+            ratio of failures and size of risk set
+            
+        """
+        self.stratum_data_=pd.DataFrame.from_records(stratum_data, index="time")
 
         # calculate error coeff for stratum
-        for t in self.stratum_data.index:
-            events_before_df = self.stratum_data.loc[:t] # for loc, the last event is included
+        for t in self.stratum_data_.index:
+            events_before_df = self.stratum_data_.loc[:t] # for loc, the last event is included
             y_j = events_before_df.loc[:, "y_j"]
             n_j = events_before_df.loc[:, "n_j"]
 
             # only sum coeffs where there is no division by zero
             to_sum = y_j/(n_j*(n_j-y_j))
             coeff = np.sum(to_sum[np.isfinite(to_sum)])**(1/2)
-            self.stratum_data.loc[t, "greenwood_coeff"] = coeff
+            self.stratum_data_.loc[t, "greenwood_coeff"] = coeff
 
 
     def _stack_data(self):
+        """
+        Implements stacking of per stratum data.
+
+        Returns
+        ----------
+        predictor_mtx: array of shape(n_unique_event_times, n_features)
+            Stacked matrix containing centered values, concatenated from each stratum
+        response_vectors: array of shape(n_unique_event_times)
+            Contains response vectors concatenated from each stratum. Contains 1 where
+            the given subject failed at the given time, otherwise 0.
+            
+        """
         # get each unique time an event happens and number of events
         unique_event_data = np.unique(self.event_data.loc[:, self.time_col], return_index=True, return_counts=True)
 
@@ -152,29 +205,78 @@ class StackingClassifier:
 
 
     def fit(self, event_data, time_col, event_col, max_censored_set_size=None):
+        """
+        Fits `model` to passed data.
+        
+        Parameters
+        ----------
+        event_data : pd.DataFrame
+            Training data.
+        time_col: string
+            Name of the column containing time data
+        event_col: string
+            Name of the data containing the events
+        max_censored_set_size: int, default=None
+            Maximum number of censored values to use in risk sets
+        
+        Returns
+        -------
+        self : object
+            Fitted isntance.
+        """
         self._set_up_data_fields(event_data, time_col, event_col, max_censored_set_size)
         
         predictor_mtx, response_vectors = self._stack_data()
         self.model.fit(predictor_mtx, response_vectors)
+
+        return self
         
 
-    def predict_one(self, x_new):
-        column_means = self.stratum_data.loc[:, self.feature_cols]
-        target_means = self.stratum_data.loc[:, "response_vec_mean"]
-        greenwood_coeff = self.stratum_data.loc[:, "greenwood_coeff"]
+    def predict_survival_function(self, x_new):
+        """
+        Predict survival function using trained `model`.
+        
+        Parameters
+        ----------
+        x_new : array of shape(n_features,)
+            Input sample
+        
+        Returns
+        -------
+        p : array of floats of shape(n_unique_event_times,)
+            Contains chance of survival at given times.
+        """
+        column_means = self.stratum_data_.loc[:, self.feature_cols]
+        target_means = self.stratum_data_.loc[:, "response_vec_mean"]
+        greenwood_coeff = self.stratum_data_.loc[:, "greenwood_coeff"]
         # predict using broadcasting, index 1 is chance of death
         predictions = self.model.predict_proba(x_new - column_means)[:, 1]
 
          # clip to 0-1 range of probabilities
-        chances_of_death = np.clip(predictions+target_means, 0, 1)
-        chance_of_survival = 1 - chances_of_death
+        chances_of_death = np.clip(target_means, 0, 1)
+        chance_of_survival = chances_of_death
         std_error = chance_of_survival * greenwood_coeff
         # return times and chances of survival
-        return self.stratum_data.index.values, chance_of_survival, std_error
+        return self.stratum_data_.index.values, predictions, std_error
 
 
-    def predict(self, x_new, t):
-        event_times = self.stratum_data.index.values
+    def predict_at(self, x_new, t):
+        """
+        Predict using trained `model` at given time.
+        
+        Parameters
+        ----------
+        x_new : array of shape(n_features,)
+            Input sample
+        t: int, 
+            Time at which to predict
+        
+        Returns
+        -------
+        p : float
+            Chance of survival
+        """
+        event_times = self.stratum_data_.index.values
         time_idx = np.searchsorted(event_times, t)
         
         # if time is greater than the end of the experiment, return the time at the end of experiment
@@ -192,3 +294,26 @@ class StackingClassifier:
 
         std_error = chance_of_survival * stratum_at["greenwood_coeff"]
         return chance_of_survival, chance_of_survival * std_error
+
+ 
+    def predict_proba(self, x_new, t=None):
+        """
+        Predict using trained `model`.
+        If `t` is passed, predict survival at that time. Else, predict survival function.
+        
+        Parameters
+        ----------
+        x_new : array of shape(n_features,)
+            Input sample
+        t: int, default=None
+            Optinial, controls whether to predict only at a given time or predic the survival funciton.
+        
+        Returns
+        -------
+        self : object
+            Fitted isntance.
+        """
+        if t is None:
+            return self.predict_survival_function(x_new)
+        else:
+            return self.predict_at(x_new, t)
