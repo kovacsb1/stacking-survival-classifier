@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -9,20 +10,16 @@ from sklearn.neural_network import MLPClassifier
 # Contains allowed model names and default parameters
 MODELS = {
     "logistic_regression": {
-        "model_class": LogisticRegression, 
-        "default_params": {"fit_intercept": False}
+        "model_class": LogisticRegression
     }, 
     "random_forest":{
-        "model_class": RandomForestClassifier, 
-        "default_params": {},
+        "model_class": RandomForestClassifier
     },
     "gradient_boosting":{
-        "model_class": GradientBoostingClassifier,
-        "default_params": {}
+        "model_class": GradientBoostingClassifier
     }, 
     "neural_network":{
-        "model_class": MLPClassifier,
-        "default_params": {}
+        "model_class": MLPClassifier
     }
 }
         
@@ -38,6 +35,8 @@ class StackingClassifier:
         and neural_network. Otherwise, raises exception
     model_args: dict
         contains keyword arguments to pass to the base model
+    max_sample_size: int, default=None
+        Maximum number of censored values to use in risk sets
 
     Attributes
     ----------
@@ -60,11 +59,9 @@ class StackingClassifier:
             raise RuntimeError(f"Base model {model_name} not implemented")
         
         model_class = MODELS[model_name]["model_class"]
-        model_params = MODELS[model_name]["default_params"]
         
         # extend default params with passed model params
-        concatenated_params = dict(model_params, **model_args)
-        self.model = model_class(**concatenated_params)
+        self.model = model_class(**model_args)
         
         # data fields
         self.event_data = None
@@ -115,7 +112,6 @@ class StackingClassifier:
         if self.max_sample_size and (self.max_sample_size < num_censored):
             censored_set= self.event_data.iloc[censord_set_start_index:]
             sampled_censored_set = censored_set.sample(self.max_sample_size, replace=False)
-            print(sampled_censored_set.shape)
             # concatenate censored set with event data
             return pd.concat([curr_event_data, sampled_censored_set], ignore_index=True)
         else:
@@ -215,8 +211,6 @@ class StackingClassifier:
             Name of the column containing time data
         event_col: string
             Name of the data containing the events
-        max_sample_size: int, default=None
-            Maximum number of censored values to use in risk sets
         
         Returns
         -------
@@ -230,38 +224,10 @@ class StackingClassifier:
 
         return self
         
-
-    def predict_survival_function(self, x_new):
+    def predict_proba_at(self, x_new, t):
         """
-        Predict survival function using trained `model`.
-        
-        Parameters
-        ----------
-        x_new : array of shape(n_features,)
-            Input sample
-        
-        Returns
-        -------
-        p : array of floats of shape(n_unique_event_times,)
-            Contains chance of survival at given times.
-        """
-        column_means = self.stratum_data_.loc[:, self.feature_cols]
-        target_means = self.stratum_data_.loc[:, "response_vec_mean"]
-        greenwood_coeff = self.stratum_data_.loc[:, "greenwood_coeff"]
-        # predict using broadcasting, index 1 is chance of death
-        predictions = self.model.predict_proba(x_new - column_means)[:, 1]
-
-         # clip to 0-1 range of probabilities
-        chances_of_death = np.clip(predictions + target_means, 0, 1) 
-        chances_of_survival = 1 - chances_of_death
-        std_error = chances_of_survival * greenwood_coeff
-        # return times and chances of survival
-        return self.stratum_data_.index.values, chances_of_survival, std_error
-
-
-    def predict_at(self, x_new, t):
-        """
-        Predict using trained `model` at given time.
+        Predict  conditional probability of surving until the neareast time after t that appeared 
+        in the dataset given that x_new has survived until t-1, as per Eq 8. from the paper
         
         Parameters
         ----------
@@ -284,35 +250,73 @@ class StackingClassifier:
 
         # get stratum means
         stratum_at = self.stratum_data_.iloc[time_idx]
-
         prediction = self.model.predict_proba(np.array([x_new - stratum_at.loc[self.feature_cols]]))[0, 1]
 
         # clip to 0-1 range of probabilities
         chance_of_death = np.clip(prediction + stratum_at.loc["response_vec_mean"], 0, 1) 
         chance_of_survival = 1 - chance_of_death
 
-        std_error = chance_of_survival * stratum_at["greenwood_coeff"]
-        return t, chance_of_survival, chance_of_survival * std_error
+        return chance_of_survival
 
- 
-    def predict_proba(self, x_new, t=None):
+    def predict_survival_function(self, x_new):
         """
-        Predict using trained `model`.
-        If `t` is passed, predict survival at that time. Else, predict survival function.
+        Predict survival function using trained `model`.
         
         Parameters
         ----------
         x_new : array of shape(n_features,)
             Input sample
-        t: int, default=None
-            Optinial, controls whether to predict only at a given time or predic the survival funciton.
         
         Returns
         -------
-        self : object
-            Fitted isntance.
+        survival_df: pd.Dataframe of shape(n_unique_event_times, 3)
+            Contains 3 columns, "time", the times when the event happened,
+            "probability", which is the chance of survival until the given time,
+            and "std_error" which contains standard error values for the Survival curve 
+            based on the Greenwood coefficients
         """
-        if t is None:
-            return self.predict_survival_function(x_new)
-        else:
-            return self.predict_at(x_new, t)
+        column_means = self.stratum_data_.loc[:, self.feature_cols]
+        target_means = self.stratum_data_.loc[:, "response_vec_mean"]
+        greenwood_coeff = self.stratum_data_.loc[:, "greenwood_coeff"]
+        # predict using broadcasting, index 1 is chance of death
+        predictions = self.model.predict_proba(x_new - column_means)[:, 1]
+
+         # clip to 0-1 range of probabilities
+        chances_of_death = np.clip(predictions + target_means, 0, 1) 
+        chances_of_survival = 1 - chances_of_death
+
+        # survival is the cumulative product of surviving until time t
+        chances_of_survival = np.cumprod(chances_of_survival)
+        
+        std_error = chances_of_survival * greenwood_coeff
+        # return times and chances of survival
+        survival_df = pd.DataFrame({
+            "time": self.stratum_data_.index.values, 
+            "probability": chances_of_survival,
+            "std_error": std_error})
+        return survival_df
+
+    def plot_survival_function(self, survival_df):
+        """
+        Plots survival function with standard error
+        
+        Parameters
+        ----------
+        survival_df : pd.DataFrame
+            Output of predict_survival_function
+        """
+        times = survival_df.loc[:, "time"]
+        preds, errors = survival_df.loc[:, "probability"], survival_df.loc[:, "std_error"]
+        
+        _fig, ax = plt.subplots()
+        ax.set_title("Survival function")
+        ax.set_xlabel('Time elapsed')
+        ax.set_ylabel('Chance of survival')
+        ax.plot(times,preds, label="Survival function")
+        ax.fill_between(times, (preds-errors), (preds+errors), 
+                        color='b', alpha=.1, label="Std error")
+        plt.legend(loc="lower left")
+        plt.show()
+
+
+    

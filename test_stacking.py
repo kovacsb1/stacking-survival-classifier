@@ -85,21 +85,35 @@ def test_stack_data(article_data):
     # response vector should look like this
     assert np.all(response_vector == [1,0,0,1])
 
-def test_predict(toy_data):
-
+def test_predict_survival_function(toy_data):
     clf = StackingClassifier()
     clf.fit(toy_data, "time", "event")
 
     x_unknown_small = np.array([0,0,0])
-    times_small, preds_small, _ = clf.predict_proba(x_unknown_small)
+    pred_df_small= clf.predict_survival_function(x_unknown_small)
 
     x_unknown_big = np.array([2,5,15])
-    times_big, preds_big, _ = clf.predict_proba(x_unknown_big)
+    pred_df_big = clf.predict_survival_function(x_unknown_big)
 
-    assert times_small.shape == preds_small.shape
-    assert times_small.shape == times_big.shape
+    assert pred_df_small.shape == pred_df_big.shape
     
     # expect survival chances of unknown item with big values to be bigger
-    assert np.all(preds_small <= preds_big)
+    assert np.all(pred_df_small.loc[:, "probability"] <= pred_df_big.loc[:, "probability"] )
 
+
+def test_predict_proba_at(toy_data):
+    clf = StackingClassifier()
+    clf.fit(toy_data, "time", "event")
+    
+    x_unknown_small = np.array([0,0,0])
+    prob= clf.predict_proba_at(x_unknown_small, 5)
+    
+    # chance of survival at the end should be small
+    assert prob < 0.1
+
+    x_unknown_big = np.array([2,5,15])
+    prob = clf.predict_proba_at(x_unknown_big, 0.3)
+    
+    # chance of survival at the beginning should be big
+    assert prob > 0.9
 ### END TEST CASES
