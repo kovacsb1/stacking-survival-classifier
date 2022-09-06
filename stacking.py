@@ -290,7 +290,7 @@ class StackingClassifier:
         chance_of_survival = 1 - chance_of_death
 
         std_error = chance_of_survival * stratum_at["greenwood_coeff"]
-        return chance_of_survival, chance_of_survival * std_error
+        return t, chance_of_survival, chance_of_survival * std_error
 
  
     def predict_proba(self, x_new, t=None):
