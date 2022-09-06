@@ -49,12 +49,12 @@ class StackingClassifier:
         Name of the data containing the events
     feature_cols: list of strings
         Contains the name of the remaining columns
-    max_censored_set_size: int
+    max_sample_size: int
         Maximum number of censored values to use in risk sets
     stratum_data_: pd.DataFrame
         Contains features for each stratum
     """
-    def __init__(self, model_name="logistic_regression", model_args={}, max_censored_set_size=None):
+    def __init__(self, model_name="logistic_regression", model_args={}, max_sample_size=None):
         
         if model_name in MODELS:
             model_class = MODELS[model_name]["model_class"]
@@ -70,7 +70,7 @@ class StackingClassifier:
         self.event_col = None
         self.feature_cols = None
 
-        self.max_censored_set_size = max_censored_set_size
+        self.max_sample_size = max_sample_size
         # store stratum means for inferencing
         self.stratum_data_ = None
 
@@ -89,7 +89,7 @@ class StackingClassifier:
     def _get_risk_set(self, curr_event_data, event_start_index, event_size):
         """
         Returns risk set. Implements sampling if risk set size is bigger than 
-        `max_censored_set_size` 
+        `max_sample_size` 
 
         Parameters
         ----------
@@ -110,9 +110,9 @@ class StackingClassifier:
 
         # sampling is needed if max censored set size is set and it is smaller than
         # the number of censored items in the current risk set
-        if self.max_censored_set_size and (self.max_censored_set_size < num_censored):
+        if self.max_sample_size and (self.max_sample_size < num_censored):
             censored_set= self.event_data.iloc[censord_set_start_index:]
-            sampled_censored_set = censored_set.sample(self.max_censored_set_size, replace=False)
+            sampled_censored_set = censored_set.sample(self.max_sample_size, replace=False)
             print(sampled_censored_set.shape)
             # concatenate censored set with event data
             return pd.concat([curr_event_data, sampled_censored_set], ignore_index=True)
@@ -213,7 +213,7 @@ class StackingClassifier:
             Name of the column containing time data
         event_col: string
             Name of the data containing the events
-        max_censored_set_size: int, default=None
+        max_sample_size: int, default=None
             Maximum number of censored values to use in risk sets
         
         Returns
