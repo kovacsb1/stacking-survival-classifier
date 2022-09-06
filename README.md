@@ -42,14 +42,14 @@ The `predict_proba_at` function is used to predict unseen data. It raises an exc
 * `x_new`:  the feature vector of the unseen data point
 * `t`: optional argument. The chance of survival is predicted, from the neareast time before t for which exists a risk set  to the nearest time after t, for which exists a risk set. Essentially an implementation of Eq. 8 from the paper
 
-The function returns one value, a probability
+The function returns one value, a probability.
 
 
 ### The `predict_survival_function` function
 The `predict_survival_function` function is also used to predict unseen data. It raises an exception if `fit` wasn't called before on the instance. It one argument:
 * `x_new`:  the feature vector of the unseen data point
 
-It returns a DataFrame, which contains record for each unique tiem in the training data for which exists a risk set, and the reords contain the time, the probability of surviving until that time, and the Greenwood coefficient as per Eq. 9 of the paper.
+It returns a DataFrame, which contains records for each unique item in the training data for which exists a risk set, and the returned records contain the time, the probability of surviving until that time, and the Greenwood coefficients as per Eq. 9 of the paper.
 
 ### The `plot_survival_function` function
 Plots survival function with standard error. Has one parameter
