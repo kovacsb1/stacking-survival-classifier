@@ -56,14 +56,16 @@ class StackingClassifier:
     """
     def __init__(self, model_name="logistic_regression", model_args={}, max_sample_size=None):
         
-        if model_name in MODELS:
-            model_class = MODELS[model_name]["model_class"]
-            model_params = MODELS[model_name]["default_params"]
-            
-            # extend default params with passed model params
-            concatenated_params = dict(model_params, **model_args)
-            self.model = model_class(**concatenated_params)
-
+        if model_name not in MODELS:
+            raise RuntimeError(f"Base model {model_name} not implemented")
+        
+        model_class = MODELS[model_name]["model_class"]
+        model_params = MODELS[model_name]["default_params"]
+        
+        # extend default params with passed model params
+        concatenated_params = dict(model_params, **model_args)
+        self.model = model_class(**concatenated_params)
+        
         # data fields
         self.event_data = None
         self.time_col = None
@@ -165,7 +167,7 @@ class StackingClassifier:
         unique_event_data = np.unique(self.event_data.loc[:, self.time_col], return_index=True, return_counts=True)
 
         risk_sets, respose_vectors = [], []
-        #column_means, target_means = {}, {}
+
         stratum_data = []
         # iterate through each unique event time
         for e_time, e_idx, e_count in zip(*unique_event_data):
@@ -223,8 +225,8 @@ class StackingClassifier:
         """
         self._set_up_data_fields(event_data, time_col, event_col)
         
-        predictor_mtx, response_vectors = self._stack_data()
-        self.model.fit(predictor_mtx, response_vectors)
+        predictor_mtx, response_vector = self._stack_data()
+        self.model.fit(predictor_mtx, response_vector)
 
         return self
         
@@ -281,7 +283,7 @@ class StackingClassifier:
             time_idx = len(event_times)-1
 
         # get stratum means
-        stratum_at = self.stratum_data.iloc[time_idx]
+        stratum_at = self.stratum_data_.iloc[time_idx]
 
         prediction = self.model.predict_proba(np.array([x_new - stratum_at.loc[self.feature_cols]]))[0, 1]
 
