@@ -18,7 +18,7 @@ Options are "logistic_regression", "random_forest", "gradient_boosting" and "neu
 
 * `max_sample_size`, an int, the maximum number of censored values to use in risk sets
 
-So for example, instanciating the class using a 2 layer nerual network as a base classifier can be done by the following call:
+So for example, instantiating the class using a 2 layer neural network as a base classifier can be done by the following call:
  ```python
  clf = StackingClassifier(model_name="neural_network", model_args={"hidden_layer_sizes":(2,)})
  ```
@@ -40,7 +40,7 @@ clf.fit(e_data, "time", "event")
 ### The `predict_proba_at` function
 The `predict_proba_at` function is used to predict unseen data. It raises an exception if `fit` wasn't called before on the instance. It has 2 arguments:
 * `x_new`:  the feature vector of the unseen data point
-* `t`: optional argument. The chance of survival is predicted, from the neareast time before t for which exists a risk set  to the nearest time after t, for which exists a risk set. Essentially an implementation of Eq. 8 from the paper
+* `t`: optional argument. The chance of survival is predicted, from the nearest time before t for which exists a risk set  to the nearest time after t, for which exists a risk set. Essentially an implementation of Eq. 8 from the paper
 
 The function returns one value, a probability.
 
@@ -53,9 +53,9 @@ It returns a DataFrame, which contains records for each unique item in the train
 
 ### The `plot_survival_function` function
 Plots survival function with standard error. Has one parameter
-* `survival_df`: a pandas DataFrame, containing the ouput of the `predict_survival_function` function
+* `survival_df`: a pandas DataFrame, containing the output of the `predict_survival_function` function
 
-An example code to plot the survival funciton:
+An example code to plot the survival function:
 ```python
 subject = np.array([0.11374, 0.40986, 0.064934])
 pred_df= clf.predict_survival_function(subject)
