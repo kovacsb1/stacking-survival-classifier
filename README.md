@@ -16,7 +16,7 @@ Options are "logistic_regression", "random_forest", "gradient_boosting" and "neu
 
 * `model_args`, a dict which contains keyword arguments to pass to the base model
 
-So for example, instanciating the class using a 2 layer nerual network as a base calssifier can be done by the following call:
+So for example, instanciating the class using a 2 layer nerual network as a base classifier can be done by the following call:
  ```python
  clf = StackingClassifier(model_name="neural_network", model_args={"hidden_layer_sizes":(2,)})
  ```
