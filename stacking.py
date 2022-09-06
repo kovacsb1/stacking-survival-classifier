@@ -54,7 +54,7 @@ class StackingClassifier:
     stratum_data_: pd.DataFrame
         Contains features for each stratum
     """
-    def __init__(self, model_name="logistic_regression", model_args={}):
+    def __init__(self, model_name="logistic_regression", model_args={}, max_censored_set_size=None):
         
         if model_name in MODELS:
             model_class = MODELS[model_name]["model_class"]
@@ -70,13 +70,12 @@ class StackingClassifier:
         self.event_col = None
         self.feature_cols = None
 
-        self.max_censored_set_size = None
-
+        self.max_censored_set_size = max_censored_set_size
         # store stratum means for inferencing
         self.stratum_data_ = None
 
 
-    def _set_up_data_fields(self, event_data, time_col, event_col, max_censored_set_size):
+    def _set_up_data_fields(self, event_data, time_col, event_col):
         self.time_col = time_col
         self.event_col = event_col
         self.feature_cols = event_data.columns.difference([time_col, event_col])
@@ -85,8 +84,6 @@ class StackingClassifier:
         self.event_data = event_data.copy()
         # sort rows by time of the event
         self.event_data = self.event_data.sort_values(by=self.time_col, axis=0)
-
-        self.max_censored_set_size = max_censored_set_size
 
 
     def _get_risk_set(self, curr_event_data, event_start_index, event_size):
@@ -116,6 +113,7 @@ class StackingClassifier:
         if self.max_censored_set_size and (self.max_censored_set_size < num_censored):
             censored_set= self.event_data.iloc[censord_set_start_index:]
             sampled_censored_set = censored_set.sample(self.max_censored_set_size, replace=False)
+            print(sampled_censored_set.shape)
             # concatenate censored set with event data
             return pd.concat([curr_event_data, sampled_censored_set], ignore_index=True)
         else:
@@ -200,11 +198,10 @@ class StackingClassifier:
                 stratum_data.append(feature_mean_dict)
 
         self._process_stratum_data(stratum_data)
-
         return np.concatenate(risk_sets), np.concatenate(respose_vectors)
 
 
-    def fit(self, event_data, time_col, event_col, max_censored_set_size=None):
+    def fit(self, event_data, time_col, event_col):
         """
         Fits `model` to passed data.
         
@@ -224,7 +221,7 @@ class StackingClassifier:
         self : object
             Fitted isntance.
         """
-        self._set_up_data_fields(event_data, time_col, event_col, max_censored_set_size)
+        self._set_up_data_fields(event_data, time_col, event_col)
         
         predictor_mtx, response_vectors = self._stack_data()
         self.model.fit(predictor_mtx, response_vectors)
@@ -253,11 +250,11 @@ class StackingClassifier:
         predictions = self.model.predict_proba(x_new - column_means)[:, 1]
 
          # clip to 0-1 range of probabilities
-        chances_of_death = np.clip(target_means, 0, 1)
-        chance_of_survival = 1- chances_of_death
-        std_error = chance_of_survival * greenwood_coeff
+        chances_of_death = np.clip(predictions + target_means, 0, 1) 
+        chances_of_survival = 1 - chances_of_death
+        std_error = chances_of_survival * greenwood_coeff
         # return times and chances of survival
-        return self.stratum_data_.index.values, chance_of_survival, std_error
+        return self.stratum_data_.index.values, chances_of_survival, std_error
 
 
     def predict_at(self, x_new, t):
