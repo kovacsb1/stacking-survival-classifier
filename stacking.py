@@ -254,10 +254,10 @@ class StackingClassifier:
 
          # clip to 0-1 range of probabilities
         chances_of_death = np.clip(target_means, 0, 1)
-        chance_of_survival = chances_of_death
+        chance_of_survival = 1- chances_of_death
         std_error = chance_of_survival * greenwood_coeff
         # return times and chances of survival
-        return self.stratum_data_.index.values, predictions, std_error
+        return self.stratum_data_.index.values, chance_of_survival, std_error
 
 
     def predict_at(self, x_new, t):
